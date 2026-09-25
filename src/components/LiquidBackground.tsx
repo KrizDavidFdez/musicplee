@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { motion } from 'motion/react';
 import { Track } from '../types';
 
 interface LiquidBackgroundProps {
   currentTrack: Track | null;
-  className?: string;
 }
 
 interface PaletteTheme {
@@ -60,20 +60,12 @@ const PRESET_PALETTES: Record<string, PaletteTheme> = {
   },
 };
 
-// High-speed in-memory palette cache to eliminate canvas/image re-computations
-const THEME_CACHE = new Map<string, PaletteTheme>();
-
-export const LiquidBackground: React.FC<LiquidBackgroundProps> = React.memo(({ currentTrack, className }) => {
+export const LiquidBackground: React.FC<LiquidBackgroundProps> = ({ currentTrack }) => {
   const [extractedTheme, setExtractedTheme] = useState<PaletteTheme | null>(null);
 
-  // Dynamic color extraction from album cover image with memory caching
+  // Dynamic color extraction from album cover image
   useEffect(() => {
     if (!currentTrack?.coverUrl) return;
-
-    if (THEME_CACHE.has(currentTrack.coverUrl)) {
-      setExtractedTheme(THEME_CACHE.get(currentTrack.coverUrl)!);
-      return;
-    }
 
     const key = Object.keys(PRESET_PALETTES).find(
       (k) =>
@@ -82,12 +74,11 @@ export const LiquidBackground: React.FC<LiquidBackgroundProps> = React.memo(({ c
     );
 
     if (key) {
-      const preset = PRESET_PALETTES[key];
-      THEME_CACHE.set(currentTrack.coverUrl, preset);
-      setExtractedTheme(preset);
+      setExtractedTheme(PRESET_PALETTES[key]);
       return;
     }
 
+    // Canvas extraction fallback
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = currentTrack.coverUrl;
@@ -95,34 +86,32 @@ export const LiquidBackground: React.FC<LiquidBackgroundProps> = React.memo(({ c
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = 4;
-        canvas.height = 4;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        canvas.width = 16;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        ctx.drawImage(img, 0, 0, 4, 4);
-        const data = ctx.getImageData(0, 0, 4, 4).data;
+        ctx.drawImage(img, 0, 0, 16, 16);
+        const data = ctx.getImageData(0, 0, 16, 16).data;
 
         const r1 = data[0], g1 = data[1], b1 = data[2];
-        const r2 = data[8 * 4] || r1, g2 = data[8 * 4 + 1] || g1, b2 = data[8 * 4 + 2] || b1;
-        const r3 = data[15 * 4] || r1, g3 = data[15 * 4 + 1] || g1, b3 = data[15 * 4 + 2] || b1;
+        const r2 = data[128 * 4], g2 = data[128 * 4 + 1], b2 = data[128 * 4 + 2];
+        const r3 = data[240 * 4], g3 = data[240 * 4 + 1], b3 = data[240 * 4 + 2];
 
-        const themeResult: PaletteTheme = {
+        setExtractedTheme({
           c1: `rgba(${r1}, ${g1}, ${b1}, 0.85)`,
           c2: `rgba(${r2}, ${g2}, ${b2}, 0.8)`,
           c3: `rgba(${Math.floor(r3 * 0.4)}, ${Math.floor(g3 * 0.4)}, ${Math.floor(b3 * 0.4)}, 0.9)`,
           c4: `rgba(${Math.min(255, r1 + 60)}, ${Math.min(255, g1 + 60)}, ${Math.min(255, b1 + 60)}, 0.65)`,
           base: `rgb(${Math.floor(r3 * 0.12)}, ${Math.floor(g3 * 0.12)}, ${Math.floor(b3 * 0.12)})`,
-        };
-
-        THEME_CACHE.set(currentTrack.coverUrl, themeResult);
-        setExtractedTheme(themeResult);
+        });
       } catch {
         setExtractedTheme(null);
       }
     };
   }, [currentTrack?.coverUrl, currentTrack?.title, currentTrack?.artist]);
 
+  // Deterministic fallback theme if image extraction fails
   const theme = useMemo(() => {
     if (extractedTheme) return extractedTheme;
 
@@ -147,8 +136,8 @@ export const LiquidBackground: React.FC<LiquidBackgroundProps> = React.memo(({ c
     return {
       c1: `hsla(${hue}, 85%, 46%, 0.85)`,
       c2: `hsla(${hue2}, 85%, 36%, 0.8)`,
-      c3: `hsla(${hue3}, 90%, 18%, 0.9)`,
-      c4: `hsla(${hue4}, 80%, 65%, 0.6)`,
+      c3: `hsla(${hue3}, 90%, 18%, 0.92)`,
+      c4: `hsla(${hue4}, 80%, 65%, 0.65)`,
       base: `hsl(${hue}, 45%, 5%)`,
     };
   }, [extractedTheme, currentTrack?.title, currentTrack?.artist]);
@@ -156,60 +145,105 @@ export const LiquidBackground: React.FC<LiquidBackgroundProps> = React.memo(({ c
   return (
     <div
       id="liquid-background"
-      className={className || "fixed inset-0 z-0 overflow-hidden pointer-events-none select-none transition-colors duration-700 w-full h-full"}
-      style={{
-        backgroundColor: theme.base,
-        willChange: 'transform',
-        transform: 'translateZ(0)',
-        contain: 'strict',
-      }}
+      className="absolute inset-0 z-0 overflow-hidden pointer-events-none select-none transition-colors duration-1000"
+      style={{ backgroundColor: theme.base }}
     >
-      {/* 1. Dynamic Flowing Album Cover Backdrop - High-efficiency smooth blur */}
+      {/* 1. REAL ALBUM COVER ANIMATED FLUID BACKDROP */}
       {currentTrack?.coverUrl && (
-        <div
-          style={{
-            backgroundImage: `url(${currentTrack.coverUrl})`,
-            willChange: 'transform',
-            transform: 'translate3d(0, 0, 0)',
+        <motion.div
+          animate={{
+            scale: [1.15, 1.35, 1.18, 1.32, 1.15],
+            rotate: [0, 8, -6, 5, 0],
+            x: [0, 25, -25, 15, 0],
+            y: [0, -30, 25, -15, 0],
           }}
-          className="absolute inset-[-12%] w-[124%] h-[124%] bg-cover bg-center opacity-55 saturate-125 blur-lg animate-liquid-cover"
+          transition={{
+            duration: 16,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+          className="absolute inset-[-35%] w-[170%] h-[170%] bg-cover bg-center blur-[90px] opacity-75 saturate-200"
+          style={{ backgroundImage: `url(${currentTrack.coverUrl})` }}
         />
       )}
 
-      {/* 2. Fluid Mesh Orb 1 (Top Left / Accent) */}
-      <div
-        style={{
-          background: `radial-gradient(circle at 30% 30%, ${theme.c1} 0%, transparent 68%)`,
-          willChange: 'transform',
-          transform: 'translate3d(0, 0, 0)',
+      {/* 2. Primary Fluid Orb 1 (Top Left) */}
+      <motion.div
+        animate={{
+          x: [0, 70, -60, 40, 0],
+          y: [0, -80, 60, -45, 0],
+          scale: [1, 1.35, 0.9, 1.25, 1],
+          rotate: [0, 90, 180, 270, 360],
         }}
-        className="absolute -top-[15%] -left-[10%] w-[100vw] h-[100vw] max-w-[800px] max-h-[800px] rounded-full blur-lg opacity-80 animate-liquid-orb-1"
+        transition={{
+          duration: 14,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+        className="absolute -top-[25%] -left-[15%] w-[110vw] h-[110vw] max-w-[1100px] max-h-[1100px] rounded-full blur-[90px] opacity-90"
+        style={{
+          background: `radial-gradient(circle, ${theme.c1} 0%, transparent 70%)`,
+        }}
       />
 
-      {/* 3. Fluid Mesh Orb 2 (Right Center / Depth) */}
-      <div
-        style={{
-          background: `radial-gradient(circle at 70% 60%, ${theme.c2} 0%, ${theme.c3} 50%, transparent 75%)`,
-          willChange: 'transform',
-          transform: 'translate3d(0, 0, 0)',
+      {/* 3. Fluid Orb 2 (Center Right) */}
+      <motion.div
+        animate={{
+          x: [0, -90, 50, -70, 0],
+          y: [0, 70, -80, 45, 0],
+          scale: [1.1, 0.85, 1.4, 1.05, 1.1],
+          rotate: [360, 270, 180, 90, 0],
         }}
-        className="absolute top-[20%] -right-[15%] w-[95vw] h-[95vw] max-w-[750px] max-h-[750px] rounded-full blur-lg opacity-75 animate-liquid-orb-2"
+        transition={{
+          duration: 18,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+        className="absolute top-[18%] -right-[20%] w-[100vw] h-[100vw] max-w-[1000px] max-h-[1000px] rounded-full blur-[95px] opacity-85"
+        style={{
+          background: `radial-gradient(circle, ${theme.c2} 0%, transparent 70%)`,
+        }}
       />
 
-      {/* 4. Fluid Mesh Orb 3 (Bottom Ambient Flare) */}
-      <div
-        style={{
-          background: `radial-gradient(circle at 50% 50%, ${theme.c4} 0%, transparent 62%)`,
-          willChange: 'transform',
-          transform: 'translate3d(0, 0, 0)',
+      {/* 4. Fluid Orb 3 (Bottom Left Depth) */}
+      <motion.div
+        animate={{
+          x: [0, 80, -50, 60, 0],
+          y: [0, -60, 70, -35, 0],
+          scale: [0.95, 1.3, 0.85, 1.25, 0.95],
+          rotate: [0, 120, 240, 360],
         }}
-        className="absolute -bottom-[15%] left-[10%] w-[85vw] h-[85vw] max-w-[700px] max-h-[700px] rounded-full blur-lg opacity-65 animate-liquid-orb-3"
+        transition={{
+          duration: 16,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+        className="absolute -bottom-[25%] left-[5%] w-[110vw] h-[110vw] max-w-[1100px] max-h-[1100px] rounded-full blur-[95px] opacity-80"
+        style={{
+          background: `radial-gradient(circle, ${theme.c3} 0%, transparent 70%)`,
+        }}
       />
 
-      {/* 5. Apple Music Darkening Tint for crisp text contrast */}
-      <div className="absolute inset-0 bg-black/40" />
+      {/* 5. Fluid Highlight Center Bloom */}
+      <motion.div
+        animate={{
+          x: [0, -40, 50, -25, 0],
+          y: [0, 35, -45, 50, 0],
+          scale: [1, 1.25, 0.85, 1.3, 1],
+        }}
+        transition={{
+          duration: 12,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+        className="absolute top-[12%] left-[20%] w-[75vw] h-[75vw] max-w-[750px] max-h-[750px] rounded-full blur-[75px] opacity-70"
+        style={{
+          background: `radial-gradient(circle, ${theme.c4} 0%, transparent 65%)`,
+        }}
+      />
+
+      {/* 6. Soft Apple Music Darkening Tint for maximum text contrast */}
+      <div className="absolute inset-0 bg-black/35 backdrop-blur-[6px]" />
     </div>
   );
-});
-
-LiquidBackground.displayName = 'LiquidBackground';
+};
